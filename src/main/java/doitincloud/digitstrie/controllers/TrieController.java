@@ -2,15 +2,21 @@ package doitincloud.digitstrie.controllers;
 
 import doitincloud.commons.Utils;
 import doitincloud.digitstrie.services.DigitsTrieServices;
+import doitincloud.rdbcache.configs.AppCtx;
 import doitincloud.rdbcache.configs.PropCfg;
 import doitincloud.rdbcache.exceptions.BadRequestException;
 import doitincloud.rdbcache.exceptions.NotFoundException;
+import doitincloud.rdbcache.models.KvIdType;
+import doitincloud.rdbcache.models.KvPair;
 import doitincloud.rdbcache.supports.Context;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
+import java.text.DecimalFormat;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,102 +25,170 @@ import java.util.Optional;
 @RestController
 public class TrieController {
 
+    private static DecimalFormat durationFormat = new DecimalFormat("#.######");
+
     @Value("${default.table:dt_number_info}")
     private String defaultTable;
 
     @Autowired
     DigitsTrieServices digitsTrieServices;
 
+    @PreAuthorize("#oauth2.hasScope('read')")
     @RequestMapping(value = {
             "/v1/get/{value}",
             "/v1/get/{value}/{opt}"
     }, method = RequestMethod.GET)
-    @ResponseBody
-    public Map<String, Object> get(
+    public ResponseEntity<?> get(
             HttpServletRequest request,
             @PathVariable("value") String value,
             @PathVariable("opt") Optional<String> opt) {
         TableNumber tn = prepare(request, value, opt);
-        Map<String, Object> map = digitsTrieServices.get(tn.context, tn.table, tn.number);
-        if (map != null && map.size() > 0) {
+        Map<String, Object> data = digitsTrieServices.get(tn.context, tn.table, tn.number);
+        if (data != null && data.size() > 0) {
             Utils.getExcutorService().submit(() -> tn.context.closeMonitor());
-            return map;
+            return sendReponse(request, tn.context, data);
         }
         throw new NotFoundException("Not found from " + tn.table + " for " + tn.number);
     }
 
+    @PreAuthorize("#oauth2.hasScope('read')")
     @RequestMapping(value = {
             "/v1/start-with/{value}",
             "/v1/start-with/{value}/{opt}"
     }, method = RequestMethod.GET)
     @ResponseBody
-    public Map<String, Object> allStartWith(
+    public ResponseEntity<?> allStartWith(
             HttpServletRequest request,
             @PathVariable("value") String value,
             @PathVariable("opt") Optional<String> opt) {
         TableNumber tn = prepare(request, value, opt);
-        Map<String, Object> map = digitsTrieServices.allStartWith(tn.context, tn.table, tn.number);
-        if (map != null && map.size() > 0) {
+        int limit = 8;
+        if (request.isUserInRole("ADMIN")) {
+            limit = 64;
+        } else if (request.isUserInRole("SUPER")) {
+            limit = 0;
+        }
+        Map<String, Object> data = digitsTrieServices.allStartWith(tn.context, tn.table, tn.number, limit);
+        if (data != null && data.size() > 0) {
             Utils.getExcutorService().submit(() -> tn.context.closeMonitor());
-            return map;
+            return sendReponse(request, tn.context, data);
         }
         throw new NotFoundException("Not found from " + tn.table + " for " + tn.number);
     }
 
+    @PreAuthorize("#oauth2.hasScope('read')")
     @RequestMapping(value = {
             "/v1/longest-match/{value}",
             "/v1/longest-match/{value}/{opt}"
     }, method = RequestMethod.GET)
     @ResponseBody
-    public Map<String, Object> longestMatch(
+    public ResponseEntity<?> longestMatch(
             HttpServletRequest request,
             @PathVariable("value") String value,
             @PathVariable("opt") Optional<String> opt) {
         TableNumber tn = prepare(request, value, opt);
-        Map<String, Object> map = digitsTrieServices.longestMatch(tn.context, tn.table, tn.number);
-        if (map != null && map.size() > 0) {
+        Map<String, Object> data = digitsTrieServices.longestMatch(tn.context, tn.table, tn.number);
+        if (data != null && data.size() > 0) {
             Utils.getExcutorService().submit(() -> tn.context.closeMonitor());
-            return map;
+            return sendReponse(request, tn.context, data);
         }
         throw new NotFoundException("Not found from " + tn.table + " for " + tn.number);
     }
 
+    @PreAuthorize("#oauth2.hasScope('write')")
     @RequestMapping(value = {
             "/v1/save/{value}",
             "/v1/save/{value}/{opt}"
     }, method = {RequestMethod.POST, RequestMethod.PATCH, RequestMethod.PUT})
     @ResponseBody
-    public Map<String, Object> save(
+    public ResponseEntity<?> save(
             HttpServletRequest request,
             @PathVariable("value") String value,
             @PathVariable("opt") Optional<String> opt,
             @RequestBody Map<String, Object> map) {
         TableNumber tn = prepare(request, value, opt);
-        Map<String, Object> mapReturn = digitsTrieServices.save(tn.context, tn.table, tn.number, map);
-        Utils.getExcutorService().submit(() -> tn.context.closeMonitor());
-        return mapReturn;
+        Utils.getExcutorService().submit(() ->
+            digitsTrieServices.save(tn.context, tn.table, tn.number, map)
+        );
+        return sendReponse(request, tn.context, "OK");
     }
 
+    @PreAuthorize("#oauth2.hasScope('write')")
+    @RequestMapping(value = {
+            "/v1/sync-save/{value}",
+            "/v1/sync-save/{value}/{opt}"
+    }, method = {RequestMethod.POST, RequestMethod.PATCH, RequestMethod.PUT})
+    @ResponseBody
+    public ResponseEntity<?> syncSave(
+            HttpServletRequest request,
+            @PathVariable("value") String value,
+            @PathVariable("opt") Optional<String> opt,
+            @RequestBody Map<String, Object> map) {
+        TableNumber tn = prepare(request, value, opt);
+        Map<String, Object> data = digitsTrieServices.save(tn.context, tn.table, tn.number, map);
+        return sendReponse(request, tn.context, data);
+    }
+
+    @PreAuthorize("#oauth2.hasScope('delete')")
     @RequestMapping(value = {
             "/v1/delete/{value}",
             "/v1/delete/{value}/{opt}"
     }, method = {RequestMethod.DELETE, RequestMethod.GET})
     @ResponseBody
-    public Map<String, Object> delete(
+    public ResponseEntity<?> delete(
+            HttpServletRequest request,
+            @PathVariable("value") String value,
+            @PathVariable("opt") Optional<String> opt) {
+        TableNumber tn = prepare(request, value, opt);
+        Utils.getExcutorService().submit(() -> {
+            boolean result = digitsTrieServices.delete(tn.context, tn.table, tn.number);
+            if (!result) {
+                KvPair pair = new KvPair(tn.context.getTraceId(), "trace");
+                Map<String, Object> map = new LinkedHashMap<>();
+                Long now = System.currentTimeMillis();
+                map.put("timestamp", now);
+                map.put("path", request.getRequestURI());
+                map.put("error", "number " + tn.number + " with table " + tn.table +" not found");
+                pair.setData(map);
+                AppCtx.getKvPairRepo().save(pair);
+            }
+        });
+        return sendReponse(request, tn.context, "OK");
+    }
+
+    @PreAuthorize("#oauth2.hasScope('delete')")
+    @RequestMapping(value = {
+            "/v1/sync-delete/{value}",
+            "/v1/sync-delete/{value}/{opt}"
+    }, method = {RequestMethod.DELETE, RequestMethod.GET})
+    @ResponseBody
+    public ResponseEntity<?> syncDelete(
             HttpServletRequest request,
             @PathVariable("value") String value,
             @PathVariable("opt") Optional<String> opt) {
         TableNumber tn = prepare(request, value, opt);
         boolean result = digitsTrieServices.delete(tn.context, tn.table, tn.number);
         if (result) {
-            Utils.getExcutorService().submit(() -> tn.context.closeMonitor());
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("timestamp", new Date());
-            map.put("status", 200);
-            map.put("message", "OK");
-            return map;
+            return sendReponse(request, tn.context, "OK");
         }
-        throw new NotFoundException("Not found from " + tn.table + " for " + tn.number);
+        throw new NotFoundException("number " + tn.number + " with table " + tn.table +" not found");
+    }
+
+    @PreAuthorize("hasRole('ROLE_ADMIN') || hasRole('ROLE_SUPER')")
+    @RequestMapping(value = {
+            "/v1/trace/{traceId}"
+    }, method = RequestMethod.GET)
+    public ResponseEntity<?> trace_get(
+            HttpServletRequest request,
+            @PathVariable("traceId") String traceId) {
+
+        Context context = new Context();
+        KvPair pair = AppCtx.getKvPairRepo().findById(new KvIdType(traceId, "trace"));
+        if (pair != null) {
+            return sendReponse(request, context, pair.getData());
+        } else {
+            return sendReponse(request, context, null);
+        }
     }
 
     private TableNumber prepare(HttpServletRequest request, String value, Optional<String> opt) {
@@ -159,6 +233,36 @@ public class TrieController {
         String table = defaultTable;
         String number;
         Context context;
+    }
+
+    ResponseEntity<Map<String, Object>> sendReponse(HttpServletRequest request, Context context, Object o) {
+        Map<String, Object> map = new LinkedHashMap<String, Object>();
+        Long now = System.currentTimeMillis();
+        map.put("timestamp", now);
+        Long duration = context.getDuration();
+        if (duration != null) {
+            double db = ((double) duration) / 1000000000.0;
+            map.put("duration", durationFormat.format(db));
+        }
+        Map<String, Object> data = null;
+        if (o instanceof Map) {
+            data = (Map<String, Object>) o;
+        } else if (o == null || o instanceof String) {
+            data = new LinkedHashMap<>();
+            if (o != null) {
+                data.put("message", o);
+            }
+        } else {
+            data = Utils.toMap(o);
+        }
+        map.put("data", data);
+        if (request.isUserInRole("ADMIN") || request.isUserInRole("SUPER")) {
+            String traceId = context.getTraceId();
+            if (traceId != null) {
+                map.put("trace_id", traceId);
+            }
+        }
+        return ResponseEntity.ok(map);
     }
 }
 

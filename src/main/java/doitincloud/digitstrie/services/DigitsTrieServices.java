@@ -23,7 +23,7 @@ public interface DigitsTrieServices {
 
     public Map<String, Object> longestMatch(Context context, String table, String key);
 
-    public Map<String, Object> allStartWith(Context context, String table, String key);
+    public Map<String, Object> allStartWith(Context context, String table, String key, int limit);
 
     public Map<String, Object> save(Context context, String table, String key, Map<String, Object> map);
 

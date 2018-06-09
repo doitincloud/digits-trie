@@ -105,7 +105,7 @@ public class DigitsTrieOps implements DigitsTrieServices {
     }
 
     @Override
-    public Map<String, Object> allStartWith(Context context, String table, String key) {
+    public Map<String, Object> allStartWith(Context context, String table, String key, int limit) {
         DigitsTrie<Boolean> digitsTrie = trieMap.get(table);
         if (digitsTrie == null) {
             return null;
@@ -116,9 +116,14 @@ public class DigitsTrieOps implements DigitsTrieServices {
         }
         Set<String> keys = keyMap.keySet();
         Map<String, Object> map = new LinkedHashMap<>();
-        keys.forEach((k) -> {
+        int i = 0;
+        for (String k: keys) {
+            if (limit != 0 && i == limit) {
+                break;
+            }
             map.put(k, digitsValueRepo.getMap(context, table, k));
-        });
+            i++;
+        }
         return map;
     }
 
